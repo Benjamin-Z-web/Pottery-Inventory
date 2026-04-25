@@ -4,8 +4,8 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import type { PotteryItem } from '@/lib/types'
-import AuthGuard from '@/components/AuthGuard'
 import BottomNav from '@/components/BottomNav'
+import type { User } from '@supabase/supabase-js'
 
 const CONDITIONS = ['Mint', 'Excellent', 'Good', 'Fair', 'Poor']
 const RARITIES = ['Common', 'Uncommon', 'Rare', 'Museum-Grade']
@@ -39,6 +39,7 @@ export default function HomePage() {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
   const [showFilters, setShowFilters] = useState(false)
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, string[]>>({})
+  const [user, setUser] = useState<User | null>(null)
   const supabase = useMemo(() => createClient(), [])
 
   const fetchItems = useCallback(async () => {
@@ -87,6 +88,7 @@ export default function HomePage() {
 
   useEffect(() => { fetchItems() }, [fetchItems])
   useEffect(() => { fetchDynamicOptions() }, [fetchDynamicOptions])
+  useEffect(() => { supabase.auth.getUser().then(({ data }) => setUser(data.user)) }, [supabase])
 
   function setFilter(key: keyof Filters, value: string) {
     setFilters(f => ({ ...f, [key]: value }))
@@ -135,24 +137,31 @@ export default function HomePage() {
   )
 
   return (
-    <AuthGuard>
       <div className="min-h-screen flex flex-col">
 
         {/* Header */}
         <header className="bg-white border-b border-[#e5e5e5] px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between sticky top-0 z-10">
           <h1 className="text-sm sm:text-lg font-light tracking-widest uppercase">Pottery Collection</h1>
           <div className="flex items-center gap-3 sm:gap-4">
-            <Link href="/add" className="hidden sm:flex items-center bg-[#111] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#333] transition-colors">
-              + Add Piece
-            </Link>
-            <button onClick={handleLogout} className="text-[#6b6b6b] hover:text-[#111] transition-colors">
-              <span className="hidden sm:inline text-sm">Sign Out</span>
-              <svg className="sm:hidden w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                <polyline points="16 17 21 12 16 7" />
-                <line x1="21" y1="12" x2="9" y2="12" />
-              </svg>
-            </button>
+            {user ? (
+              <>
+                <Link href="/add" className="hidden sm:flex items-center bg-[#111] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#333] transition-colors">
+                  + Add Piece
+                </Link>
+                <button onClick={handleLogout} className="text-[#6b6b6b] hover:text-[#111] transition-colors">
+                  <span className="hidden sm:inline text-sm">Sign Out</span>
+                  <svg className="sm:hidden w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                  </svg>
+                </button>
+              </>
+            ) : (
+              <Link href="/login" className="text-sm text-[#6b6b6b] hover:text-[#111] transition-colors">
+                Sign In
+              </Link>
+            )}
           </div>
         </header>
 
@@ -279,7 +288,6 @@ export default function HomePage() {
 
         <BottomNav />
       </div>
-    </AuthGuard>
   )
 }
 

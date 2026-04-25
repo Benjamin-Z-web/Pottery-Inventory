@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import type { PotteryItem } from '@/lib/types'
-import AuthGuard from '@/components/AuthGuard'
+import type { User } from '@supabase/supabase-js'
 
 const CONDITIONS = ['Mint', 'Excellent', 'Good', 'Fair', 'Poor']
 const RARITIES = ['Common', 'Uncommon', 'Rare', 'Museum-Grade']
@@ -34,6 +34,9 @@ export default function ItemPage() {
   const [generating, setGenerating] = useState(false)
   const [suggestions, setSuggestions] = useState<Record<string, string> | null>(null)
   const [appliedKeys, setAppliedKeys] = useState<Set<string>>(new Set())
+  const [user, setUser] = useState<User | null>(null)
+
+  useEffect(() => { supabase.auth.getUser().then(({ data }) => setUser(data.user)) }, [supabase])
 
   useEffect(() => {
     async function load() {
@@ -156,7 +159,6 @@ export default function ItemPage() {
   const allPhotos = [...existingPhotos, ...newPreviews]
 
   return (
-    <AuthGuard>
       <div className="min-h-screen flex flex-col bg-[#f9f9f9]">
 
         {/* Header */}
@@ -167,37 +169,39 @@ export default function ItemPage() {
             </svg>
           </Link>
           <span className="text-xs sm:text-sm font-mono text-[#6b6b6b] flex-1 truncate">{item.sku}</span>
-          <div className="flex items-center gap-2 shrink-0">
-            {editing ? (
-              <>
-                <button
-                  onClick={() => { setEditing(false); setForm(item); setNewPhotos([]); setNewPreviews([]); setRemovedPhotoUrls(new Set()) }}
-                  className="text-sm text-[#6b6b6b] hover:text-[#111] transition-colors px-2 py-1"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="bg-[#111] text-white text-sm px-4 py-2 rounded-xl hover:bg-[#333] transition-colors disabled:opacity-50"
-                >
-                  {saving ? 'Saving...' : 'Save'}
-                </button>
-              </>
-            ) : (
-              <>
-                <button onClick={handleArchive} className="text-sm text-[#6b6b6b] hover:text-red-500 transition-colors hidden sm:block">
-                  Archive
-                </button>
-                <button
-                  onClick={() => setEditing(true)}
-                  className="bg-[#111] text-white text-sm px-4 py-2 rounded-xl hover:bg-[#333] transition-colors"
-                >
-                  Edit
-                </button>
-              </>
-            )}
-          </div>
+          {user && (
+            <div className="flex items-center gap-2 shrink-0">
+              {editing ? (
+                <>
+                  <button
+                    onClick={() => { setEditing(false); setForm(item); setNewPhotos([]); setNewPreviews([]); setRemovedPhotoUrls(new Set()) }}
+                    className="text-sm text-[#6b6b6b] hover:text-[#111] transition-colors px-2 py-1"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="bg-[#111] text-white text-sm px-4 py-2 rounded-xl hover:bg-[#333] transition-colors disabled:opacity-50"
+                  >
+                    {saving ? 'Saving...' : 'Save'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button onClick={handleArchive} className="text-sm text-[#6b6b6b] hover:text-red-500 transition-colors hidden sm:block">
+                    Archive
+                  </button>
+                  <button
+                    onClick={() => setEditing(true)}
+                    className="bg-[#111] text-white text-sm px-4 py-2 rounded-xl hover:bg-[#333] transition-colors"
+                  >
+                    Edit
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </header>
 
         <main className="flex-1 max-w-4xl mx-auto w-full">
@@ -319,7 +323,7 @@ export default function ItemPage() {
               )}
 
               {/* Mobile archive button */}
-              {!editing && (
+              {user && !editing && (
                 <div className="px-4 sm:px-0 pb-4 mt-2 sm:hidden">
                   <button onClick={handleArchive} className="w-full border border-[#e5e5e5] bg-white rounded-xl py-2.5 text-sm text-[#6b6b6b] hover:border-red-300 hover:text-red-500 transition-colors">
                     Archive this piece
@@ -339,7 +343,6 @@ export default function ItemPage() {
           </div>
         </main>
       </div>
-    </AuthGuard>
   )
 }
 
