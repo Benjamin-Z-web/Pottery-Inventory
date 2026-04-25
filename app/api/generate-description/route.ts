@@ -3,18 +3,9 @@ import Anthropic from '@anthropic-ai/sdk'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-export async function POST(request: NextRequest) {
-  try {
-    const { imageBase64, mediaType } = await request.json()
+type ImageInput = { imageBase64: string; mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' }
 
-    if (!imageBase64 || !mediaType) {
-      return NextResponse.json({ error: 'Missing image data' }, { status: 400 })
-    }
-
-    const response = await client.messages.create({
-      model: 'claude-opus-4-7',
-      max_tokens: 4096,
-      system: `You are a specialist in archaeological ceramics with deep expertise in North American Indigenous pottery traditions, pre-Columbian ceramics, and world pottery. You have encyclopedic knowledge of the following traditions and their diagnostic markers:
+const SYSTEM_PROMPT = `You are a specialist in archaeological ceramics with deep expertise in North American Indigenous pottery traditions, pre-Columbian ceramics, and world pottery. You have encyclopedic knowledge of the following traditions and their diagnostic markers:
 
 NORTH AMERICAN TRADITIONS (prioritize these when features are consistent):
 - Mississippian (800–1600 CE): Shell-tempered paste (visible white flecks), round-bottomed forms, red/white/buff slip painting, spiral motifs, negative painting technique, effigy vessels (head pots, zoomorphic effigies with spouts), incised decoration. Subtypes: Ramey Incised, Powell Plain, Moundville Engraved (glossy black, shell-tempered), Caddoan (thin walls, geometric engraving, dark glossy finish), Cahokian wares.
@@ -37,22 +28,14 @@ CRITICAL ATTRIBUTION RULES:
 2. Look for visible shell temper (white flecks in paste) as a strong indicator of Mississippian origin.
 3. When two traditions share a visual feature (e.g., spirals + effigy form), explicitly name both possibilities and explain what additional evidence would distinguish them.
 4. Express uncertainty with specific reasoning — never make a confident attribution when the evidence is ambiguous.
-5. Note if the image quality or angle limits your ability to observe key diagnostic features.`,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: mediaType,
-                data: imageBase64,
-              },
-            },
-            {
-              type: 'text',
-              text: `Examine this pottery piece with rigorous attention to its specific visual details. Do NOT give a generic response — every observation must be grounded in what is actually visible in this image.
+5. Note if the image quality or angle limits your ability to observe key diagnostic features.`
+
+function buildTextPrompt(imageCount: number): string {
+  const intro = imageCount > 1
+    ? `Examine these ${imageCount} photographs of the same pottery piece taken from different angles. Synthesize observations across all images — features visible in one photo but not others are equally valid. Cross-reference each angle to build the most complete and accurate attribution possible.`
+    : `Examine this pottery piece with rigorous attention to its specific visual details. Do NOT give a generic response — every observation must be grounded in what is actually visible in this image.`
+
+  return `${intro}
 
 Analyze these diagnostic features before drawing conclusions:
 - FORM: vessel shape, rim profile, base type, handle/appendage style, proportions
@@ -78,23 +61,52 @@ Return ONLY a single valid JSON object — no explanation, no markdown, no text 
   "originality": "one of: Authenticated Original, Suspected Original, Reproduction, Unknown",
   "dimensions": "estimated dimensions if scale is visible — null otherwise",
   "research_notes": "iconographic observations, parallels to known examples, typological features, and what additional examination (paste analysis, TL dating) would confirm the attribution. Written as a completed note."
-}`,
-            },
+}`
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+
+    // Support both single image (legacy) and multiple images
+    const images: ImageInput[] = body.images
+      ?? [{ imageBase64: body.imageBase64, mediaType: body.mediaType }]
+
+    if (!images.length || !images[0].imageBase64) {
+      return NextResponse.json({ error: 'Missing image data' }, { status: 400 })
+    }
+
+    const imageBlocks = images.map(img => ({
+      type: 'image' as const,
+      source: {
+        type: 'base64' as const,
+        media_type: img.mediaType,
+        data: img.imageBase64,
+      },
+    }))
+
+    const response = await client.messages.create({
+      model: 'claude-opus-4-7',
+      max_tokens: 4096,
+      system: SYSTEM_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            ...imageBlocks,
+            { type: 'text', text: buildTextPrompt(images.length) },
           ],
         },
       ],
     })
 
     const text = response.content.find(b => b.type === 'text')?.text ?? ''
-
-    // Extract JSON from response
     const jsonMatch = text.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
       return NextResponse.json({ error: 'Failed to parse response' }, { status: 500 })
     }
 
-    const parsed = JSON.parse(jsonMatch[0])
-    return NextResponse.json(parsed)
+    return NextResponse.json(JSON.parse(jsonMatch[0]))
   } catch (err) {
     console.error('Claude API error:', err)
     return NextResponse.json({ error: 'Failed to generate description' }, { status: 500 })

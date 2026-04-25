@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
@@ -9,6 +9,8 @@ import AuthGuard from '@/components/AuthGuard'
 const CONDITIONS = ['Mint', 'Excellent', 'Good', 'Fair', 'Poor']
 const RARITIES = ['Common', 'Uncommon', 'Rare', 'Museum-Grade']
 const ORIGINALITIES = ['Authenticated Original', 'Suspected Original', 'Reproduction', 'Unknown']
+
+type PhotoMode = 'single' | 'multi' | null
 
 type AISuggestions = {
   description?: string
@@ -26,25 +28,17 @@ type AISuggestions = {
 }
 
 const SUGGESTION_LABELS: Record<keyof AISuggestions, string> = {
-  description: 'Description',
-  name: 'Name',
-  place_of_origin: 'Place of Origin',
-  age: 'Age / Period',
-  color: 'Color',
-  use_function: 'Use / Function',
-  tribe_culture: 'Tribe / Culture',
-  condition: 'Condition',
-  rarity: 'Rarity',
-  originality: 'Originality',
-  dimensions: 'Dimensions',
-  research_notes: 'Research Notes',
+  description: 'Description', name: 'Name', place_of_origin: 'Place of Origin',
+  age: 'Age / Period', color: 'Color', use_function: 'Use / Function',
+  tribe_culture: 'Tribe / Culture', condition: 'Condition', rarity: 'Rarity',
+  originality: 'Originality', dimensions: 'Dimensions', research_notes: 'Research Notes',
 }
 
 export default function AddPage() {
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const [photoMode, setPhotoMode] = useState<PhotoMode>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [photos, setPhotos] = useState<File[]>([])
@@ -55,24 +49,10 @@ export default function AddPage() {
   const [appliedKeys, setAppliedKeys] = useState<Set<string>>(new Set())
 
   const [form, setForm] = useState({
-    name: '',
-    use_function: '',
-    place_of_origin: '',
-    age: '',
-    color: '',
-    tribe_culture: '',
-    condition: '',
-    rarity: '',
-    originality: '',
-    dimensions: '',
-    date_acquired: '',
-    location_acquired: '',
-    seller_donator: '',
-    appraised_value: '',
-    acquisition_cost: '',
-    location_in_case: '',
-    museums_comparable: '',
-    provenance: '',
+    name: '', use_function: '', place_of_origin: '', age: '', color: '',
+    tribe_culture: '', condition: '', rarity: '', originality: '', dimensions: '',
+    date_acquired: '', location_acquired: '', seller_donator: '', appraised_value: '',
+    acquisition_cost: '', location_in_case: '', museums_comparable: '', provenance: '',
     research_notes: '',
   })
 
@@ -80,21 +60,24 @@ export default function AddPage() {
     setForm(f => ({ ...f, [field]: value }))
   }
 
-  async function analyzePhoto(file: File) {
+  async function fileToBase64(file: File): Promise<{ imageBase64: string; mediaType: string }> {
+    const buffer = await file.arrayBuffer()
+    const bytes = new Uint8Array(buffer)
+    let binary = ''
+    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
+    return { imageBase64: btoa(binary), mediaType: file.type }
+  }
+
+  async function analyzePhotos(files: File[]) {
     setGenerating(true)
     setSuggestions(null)
     setAppliedKeys(new Set())
     try {
-      const buffer = await file.arrayBuffer()
-      const bytes = new Uint8Array(buffer)
-      let binary = ''
-      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
-      const base64 = btoa(binary)
-      const mediaType = file.type as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+      const images = await Promise.all(files.map(fileToBase64))
       const res = await fetch('/api/generate-description', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: base64, mediaType }),
+        body: JSON.stringify({ images }),
       })
       const data = await res.json()
       if (data && !data.error) setSuggestions(data)
@@ -110,9 +93,8 @@ export default function AddPage() {
     const isFirst = photos.length === 0
     setPhotos(prev => [...prev, ...files])
     setPreviews(prev => [...prev, ...files.map(f => URL.createObjectURL(f))])
-    // Auto-analyze the first photo immediately
-    if (isFirst) analyzePhoto(files[0])
-    // Reset input so same file can be re-selected
+    // Auto-analyze immediately in single mode
+    if (photoMode === 'single' && isFirst) analyzePhotos([files[0]])
     e.target.value = ''
   }
 
@@ -124,11 +106,8 @@ export default function AddPage() {
   function applySuggestion(key: keyof AISuggestions) {
     const value = suggestions?.[key]
     if (!value) return
-    if (key === 'description') {
-      setDescription(value)
-    } else {
-      set(key, value)
-    }
+    if (key === 'description') setDescription(value)
+    else set(key, value)
     setAppliedKeys(prev => new Set([...prev, key]))
   }
 
@@ -163,12 +142,10 @@ export default function AddPage() {
       const { data, error: insertError } = await supabase
         .from('pottery')
         .insert({
-          sku,
-          name: form.name,
+          sku, name: form.name,
           use_function: form.use_function || null,
           place_of_origin: form.place_of_origin,
-          age: form.age,
-          color: form.color,
+          age: form.age, color: form.color,
           tribe_culture: form.tribe_culture || null,
           condition: form.condition || null,
           rarity: form.rarity || null,
@@ -187,8 +164,7 @@ export default function AddPage() {
           description: description || null,
           status: 'Active',
         })
-        .select()
-        .single()
+        .select().single()
       if (insertError) throw insertError
       router.push(`/item/${data.id}`)
     } catch (err: unknown) {
@@ -212,96 +188,163 @@ export default function AddPage() {
         <main className="flex-1 max-w-2xl mx-auto w-full px-4 sm:px-6 py-4 sm:py-8 pb-8">
           <form onSubmit={handleSubmit} className="flex flex-col gap-5">
 
-            {/* ── Photo capture ── */}
-            <section className="bg-white border border-[#e5e5e5] rounded-2xl overflow-hidden">
-              {previews.length === 0 ? (
-                /* Empty state: big tap target */
-                <label className="flex flex-col items-center justify-center gap-3 py-12 cursor-pointer group">
-                  <div className="w-16 h-16 rounded-full bg-[#f3f3f3] group-active:bg-[#e5e5e5] flex items-center justify-center transition-colors">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#6b6b6b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                      <circle cx="12" cy="13" r="4" />
-                    </svg>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-sm font-medium text-[#111]">Photograph your piece</p>
-                    <p className="text-xs text-[#6b6b6b] mt-1">AI will analyze it automatically</p>
-                  </div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    multiple
-                    onChange={handlePhotoChange}
-                    className="hidden"
-                  />
-                </label>
-              ) : (
-                /* Photos exist */
-                <div className="p-4">
-                  {/* Analyzing banner */}
-                  {generating && (
-                    <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-[#f9f9f9] border border-[#e5e5e5] rounded-xl">
-                      <svg className="animate-spin shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b6b6b" strokeWidth="2">
-                        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                      </svg>
-                      <p className="text-xs text-[#6b6b6b]">Analyzing your piece with AI...</p>
-                    </div>
-                  )}
-                  {/* Thumbnail grid */}
-                  <div className="flex flex-wrap gap-2">
-                    {previews.map((src, i) => (
-                      <div key={i} className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden border border-[#e5e5e5]">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={src} alt="" className="w-full h-full object-cover" />
-                        {i === 0 && generating && (
-                          <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
-                            <svg className="animate-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
-                              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                            </svg>
-                          </div>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => removePhoto(i)}
-                          className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-black transition-colors"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                    {/* Add more */}
-                    <label className="w-20 h-20 sm:w-24 sm:h-24 border-2 border-dashed border-[#e5e5e5] rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-[#aaa] transition-colors">
-                      <span className="text-xl text-[#ccc]">+</span>
-                      <span className="text-[10px] text-[#aaa]">Add</span>
-                      <input type="file" accept="image/*" capture="environment" multiple onChange={handlePhotoChange} className="hidden" />
-                    </label>
-                  </div>
-                  {/* Re-analyze button */}
-                  {!generating && photos.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => analyzePhoto(photos[0])}
-                      className="mt-3 text-xs text-[#6b6b6b] hover:text-[#111] underline underline-offset-2 transition-colors"
-                    >
-                      Re-analyze with AI
-                    </button>
-                  )}
+            {/* ── Step 1: Mode picker ── */}
+            {photoMode === null && (
+              <section className="bg-white border border-[#e5e5e5] rounded-2xl overflow-hidden">
+                <div className="px-6 pt-6 pb-4 text-center">
+                  <p className="text-sm font-medium text-[#111]">How would you like to photograph this piece?</p>
+                  <p className="text-xs text-[#6b6b6b] mt-1">Multiple photos give Claude more angles for a more accurate analysis</p>
                 </div>
-              )}
-            </section>
+                <div className="grid grid-cols-2 divide-x divide-[#e5e5e5] border-t border-[#e5e5e5]">
+                  {/* Single */}
+                  <button
+                    type="button"
+                    onClick={() => setPhotoMode('single')}
+                    className="flex flex-col items-center gap-3 p-6 hover:bg-[#f9f9f9] active:bg-[#f3f3f3] transition-colors"
+                  >
+                    <div className="w-14 h-14 rounded-full bg-[#f3f3f3] flex items-center justify-center">
+                      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#6b6b6b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                        <circle cx="12" cy="13" r="4" />
+                      </svg>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm font-medium text-[#111]">Single Photo</p>
+                      <p className="text-xs text-[#6b6b6b] mt-0.5">AI analyzes immediately</p>
+                    </div>
+                  </button>
+
+                  {/* Multiple */}
+                  <button
+                    type="button"
+                    onClick={() => setPhotoMode('multi')}
+                    className="flex flex-col items-center gap-3 p-6 hover:bg-[#f9f9f9] active:bg-[#f3f3f3] transition-colors"
+                  >
+                    <div className="w-14 h-14 rounded-full bg-[#111] flex items-center justify-center">
+                      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="2" y="6" width="14" height="13" rx="2" />
+                        <path d="M16 8h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-3" />
+                        <circle cx="9" cy="13" r="2.5" />
+                      </svg>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm font-medium text-[#111]">Multiple Photos</p>
+                      <p className="text-xs text-[#6b6b6b] mt-0.5">Add all, then analyze</p>
+                    </div>
+                  </button>
+                </div>
+              </section>
+            )}
+
+            {/* ── Step 2: Photo capture (after mode selected) ── */}
+            {photoMode !== null && (
+              <section className="bg-white border border-[#e5e5e5] rounded-2xl overflow-hidden">
+                {previews.length === 0 ? (
+                  /* Empty: big tap target */
+                  <label className="flex flex-col items-center justify-center gap-3 py-12 cursor-pointer group">
+                    <div className="w-16 h-16 rounded-full bg-[#f3f3f3] group-active:bg-[#e5e5e5] flex items-center justify-center transition-colors">
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#6b6b6b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                        <circle cx="12" cy="13" r="4" />
+                      </svg>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm font-medium text-[#111]">
+                        {photoMode === 'single' ? 'Photograph your piece' : 'Add your first photo'}
+                      </p>
+                      <p className="text-xs text-[#6b6b6b] mt-1">
+                        {photoMode === 'single' ? 'AI will analyze it automatically' : 'Add all angles, then run analysis'}
+                      </p>
+                    </div>
+                    <input type="file" accept="image/*" capture="environment" multiple={photoMode === 'multi'} onChange={handlePhotoChange} className="hidden" />
+                  </label>
+                ) : (
+                  <div className="p-4">
+                    {/* Analyzing banner */}
+                    {generating && (
+                      <div className="flex items-center gap-2 mb-3 px-3 py-2.5 bg-[#f9f9f9] border border-[#e5e5e5] rounded-xl">
+                        <svg className="animate-spin shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b6b6b" strokeWidth="2">
+                          <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                        </svg>
+                        <p className="text-xs text-[#6b6b6b]">
+                          {photos.length > 1
+                            ? `Analyzing ${photos.length} photos with AI...`
+                            : 'Analyzing your piece with AI...'}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Thumbnails */}
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {previews.map((src, i) => (
+                        <div key={i} className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden border border-[#e5e5e5]">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={src} alt="" className="w-full h-full object-cover" />
+                          {i === 0 && generating && (
+                            <div className="absolute inset-0 bg-black/25 flex items-center justify-center">
+                              <svg className="animate-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
+                                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                              </svg>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => removePhoto(i)}
+                            className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-black transition-colors"
+                          >×</button>
+                        </div>
+                      ))}
+                      {/* Add more button */}
+                      <label className="w-20 h-20 sm:w-24 sm:h-24 border-2 border-dashed border-[#e5e5e5] rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-[#aaa] transition-colors">
+                        <span className="text-xl text-[#ccc]">+</span>
+                        <span className="text-[10px] text-[#aaa]">Add</span>
+                        <input type="file" accept="image/*" capture="environment" multiple onChange={handlePhotoChange} className="hidden" />
+                      </label>
+                    </div>
+
+                    {/* Multi mode: Analyze All button */}
+                    {photoMode === 'multi' && !generating && photos.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => analyzePhotos(photos)}
+                        className="w-full bg-[#111] text-white rounded-xl py-3 text-sm font-medium hover:bg-[#333] transition-colors"
+                      >
+                        Analyze {photos.length} {photos.length === 1 ? 'Photo' : 'Photos'} with AI
+                      </button>
+                    )}
+
+                    {/* Single mode: re-analyze option */}
+                    {photoMode === 'single' && !generating && photos.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => analyzePhotos(photos)}
+                        className="text-xs text-[#6b6b6b] hover:text-[#111] underline underline-offset-2 transition-colors"
+                      >
+                        Re-analyze with AI
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Mode switcher */}
+                <div className="px-4 pb-3 border-t border-[#f3f3f3] pt-3">
+                  <button
+                    type="button"
+                    onClick={() => { setPhotoMode(null); setPhotos([]); setPreviews([]); setSuggestions(null) }}
+                    className="text-xs text-[#bbb] hover:text-[#6b6b6b] transition-colors"
+                  >
+                    ← Change photo mode
+                  </button>
+                </div>
+              </section>
+            )}
 
             {/* ── AI Suggestions ── */}
             {suggestions && (
               <section className="bg-[#f9f9f9] border border-[#e5e5e5] rounded-2xl p-4 sm:p-6">
                 <div className="flex items-center justify-between mb-4">
                   <p className="text-xs text-[#6b6b6b] uppercase tracking-wider">AI Suggestions</p>
-                  <button
-                    type="button"
-                    onClick={applyAll}
-                    className="text-xs bg-[#111] text-white px-3 py-1.5 rounded-lg hover:bg-[#333] transition-colors"
-                  >
+                  <button type="button" onClick={applyAll} className="text-xs bg-[#111] text-white px-3 py-1.5 rounded-lg hover:bg-[#333] transition-colors">
                     Apply All
                   </button>
                 </div>
@@ -393,27 +436,25 @@ export default function AddPage() {
             {/* ── Acquisition ── */}
             <section className="bg-white border border-[#e5e5e5] rounded-2xl p-4 sm:p-6">
               <p className="text-xs text-[#6b6b6b] uppercase tracking-wider mb-4">Acquisition</p>
-              <div className="flex flex-col gap-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <Field label="Date Acquired">
-                    <input type="date" value={form.date_acquired} onChange={e => set('date_acquired', e.target.value)} className={inputClass} />
-                  </Field>
-                  <Field label="Location Acquired">
-                    <input value={form.location_acquired} onChange={e => set('location_acquired', e.target.value)} className={inputClass} />
-                  </Field>
-                  <Field label="Seller / Donator">
-                    <input value={form.seller_donator} onChange={e => set('seller_donator', e.target.value)} className={inputClass} />
-                  </Field>
-                  <Field label="Provenance">
-                    <input value={form.provenance} onChange={e => set('provenance', e.target.value)} placeholder="Chain of ownership" className={inputClass} />
-                  </Field>
-                  <Field label="Acquisition Cost ($)">
-                    <input type="number" value={form.acquisition_cost} onChange={e => set('acquisition_cost', e.target.value)} min="0" step="0.01" className={inputClass} />
-                  </Field>
-                  <Field label="Appraised Value ($)">
-                    <input type="number" value={form.appraised_value} onChange={e => set('appraised_value', e.target.value)} min="0" step="0.01" className={inputClass} />
-                  </Field>
-                </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Date Acquired">
+                  <input type="date" value={form.date_acquired} onChange={e => set('date_acquired', e.target.value)} className={inputClass} />
+                </Field>
+                <Field label="Location Acquired">
+                  <input value={form.location_acquired} onChange={e => set('location_acquired', e.target.value)} className={inputClass} />
+                </Field>
+                <Field label="Seller / Donator">
+                  <input value={form.seller_donator} onChange={e => set('seller_donator', e.target.value)} className={inputClass} />
+                </Field>
+                <Field label="Provenance">
+                  <input value={form.provenance} onChange={e => set('provenance', e.target.value)} placeholder="Chain of ownership" className={inputClass} />
+                </Field>
+                <Field label="Acquisition Cost ($)">
+                  <input type="number" value={form.acquisition_cost} onChange={e => set('acquisition_cost', e.target.value)} min="0" step="0.01" className={inputClass} />
+                </Field>
+                <Field label="Appraised Value ($)">
+                  <input type="number" value={form.appraised_value} onChange={e => set('appraised_value', e.target.value)} min="0" step="0.01" className={inputClass} />
+                </Field>
               </div>
             </section>
 
@@ -425,12 +466,7 @@ export default function AddPage() {
                   <input value={form.museums_comparable} onChange={e => set('museums_comparable', e.target.value)} className={inputClass} />
                 </Field>
                 <Field label="Notes">
-                  <textarea
-                    value={form.research_notes}
-                    onChange={e => set('research_notes', e.target.value)}
-                    rows={3}
-                    className={inputClass + ' resize-none'}
-                  />
+                  <textarea value={form.research_notes} onChange={e => set('research_notes', e.target.value)} rows={3} className={inputClass + ' resize-none'} />
                 </Field>
               </div>
             </section>
@@ -438,13 +474,7 @@ export default function AddPage() {
             {/* ── Description ── */}
             <section className="bg-white border border-[#e5e5e5] rounded-2xl p-4 sm:p-6">
               <label className="text-xs text-[#6b6b6b] uppercase tracking-wider block mb-3">Description</label>
-              <textarea
-                value={description}
-                onChange={e => setDescription(e.target.value)}
-                rows={4}
-                placeholder="AI-generated or written description..."
-                className={inputClass + ' resize-none'}
-              />
+              <textarea value={description} onChange={e => setDescription(e.target.value)} rows={4} placeholder="AI-generated or written description..." className={inputClass + ' resize-none'} />
             </section>
 
             {error && <p className="text-red-500 text-sm px-1">{error}</p>}
