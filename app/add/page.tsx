@@ -61,11 +61,29 @@ export default function AddPage() {
   }
 
   async function fileToBase64(file: File): Promise<{ imageBase64: string; mediaType: string }> {
-    const buffer = await file.arrayBuffer()
-    const bytes = new Uint8Array(buffer)
-    let binary = ''
-    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
-    return { imageBase64: btoa(binary), mediaType: file.type }
+    const MAX_DIM = 1568
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      const url = URL.createObjectURL(file)
+      img.onload = () => {
+        URL.revokeObjectURL(url)
+        let { width, height } = img
+        if (width > MAX_DIM || height > MAX_DIM) {
+          if (width >= height) { height = Math.round((height / width) * MAX_DIM); width = MAX_DIM }
+          else { width = Math.round((width / height) * MAX_DIM); height = MAX_DIM }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (!ctx) { reject(new Error('Canvas unavailable')); return }
+        ctx.drawImage(img, 0, 0, width, height)
+        const data = canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
+        resolve({ imageBase64: data, mediaType: 'image/jpeg' })
+      }
+      img.onerror = reject
+      img.src = url
+    })
   }
 
   async function analyzePhotos(files: File[]) {
