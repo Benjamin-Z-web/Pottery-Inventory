@@ -298,7 +298,7 @@ export default function AddPage() {
                         <div key={i} className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden border border-[#e5e5e5]">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={src} alt="" className="w-full h-full object-cover" />
-                          {i === 0 && generating && (
+                          {generating && (
                             <div className="absolute inset-0 bg-black/25 flex items-center justify-center">
                               <svg className="animate-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
                                 <path d="M21 12a9 9 0 1 1-6.219-8.56" />
