@@ -177,16 +177,20 @@ export default function AddPage() {
           location_in_case: form.location_in_case || null,
           museums_comparable: form.museums_comparable || null,
           provenance: form.provenance || null,
-          research_notes: form.research_notes || null,
+          research_notes: form.research_notes || description
+            ? [description, form.research_notes].filter(Boolean).join('\n\n')
+            : null,
           photos: photoUrls,
-          description: description || null,
           status: 'Active',
         })
         .select().single()
       if (insertError) throw insertError
       router.push(`/item/${data.id}`)
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Something went wrong')
+      const msg = err instanceof Error
+        ? err.message
+        : (err as { message?: string })?.message ?? 'Something went wrong'
+      setError(msg)
       setSaving(false)
     }
   }
