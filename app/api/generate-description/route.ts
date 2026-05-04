@@ -30,12 +30,16 @@ CRITICAL ATTRIBUTION RULES:
 4. Express uncertainty with specific reasoning — never make a confident attribution when the evidence is ambiguous.
 5. Note if the image quality or angle limits your ability to observe key diagnostic features.`
 
-function buildTextPrompt(imageCount: number): string {
+function buildTextPrompt(imageCount: number, userContext?: string): string {
   const intro = imageCount > 1
     ? `Examine these ${imageCount} photographs of the same pottery piece taken from different angles. Synthesize observations across all images — features visible in one photo but not others are equally valid. Cross-reference each angle to build the most complete and accurate attribution possible.`
     : `Examine this pottery piece with rigorous attention to its specific visual details. Do NOT give a generic response — every observation must be grounded in what is actually visible in this image.`
 
-  return `${intro}
+  const contextBlock = userContext
+    ? `\n\nThe collector has provided the following personal observations and context about this piece. Factor these into your analysis — they may clarify attribution, condition, or provenance:\n\n"${userContext}"\n`
+    : ''
+
+  return `${intro}${contextBlock}
 
 Analyze these diagnostic features before drawing conclusions:
 - FORM: vessel shape, rim profile, base type, handle/appendage style, proportions
@@ -94,7 +98,7 @@ export async function POST(request: NextRequest) {
           role: 'user',
           content: [
             ...imageBlocks,
-            { type: 'text', text: buildTextPrompt(images.length) },
+            { type: 'text', text: buildTextPrompt(images.length, body.userContext) },
           ],
         },
       ],

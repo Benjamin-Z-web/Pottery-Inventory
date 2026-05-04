@@ -34,6 +34,7 @@ export default function ItemPage() {
   const [generating, setGenerating] = useState(false)
   const [suggestions, setSuggestions] = useState<Record<string, string> | null>(null)
   const [appliedKeys, setAppliedKeys] = useState<Set<string>>(new Set())
+  const [userContext, setUserContext] = useState('')
   const [user, setUser] = useState<User | null>(null)
 
   useEffect(() => { supabase.auth.getUser().then(({ data }) => setUser(data.user)) }, [supabase])
@@ -91,31 +92,72 @@ export default function ItemPage() {
     setSaving(false)
   }
 
+  async function resizeUrl(url: string): Promise<{ imageBase64: string; mediaType: string }> {
+    const MAX_DIM = 1568
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      img.onload = () => {
+        let { width, height } = img
+        if (width > MAX_DIM || height > MAX_DIM) {
+          if (width >= height) { height = Math.round((height / width) * MAX_DIM); width = MAX_DIM }
+          else { width = Math.round((width / height) * MAX_DIM); height = MAX_DIM }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (!ctx) { reject(new Error('Canvas unavailable')); return }
+        ctx.drawImage(img, 0, 0, width, height)
+        resolve({ imageBase64: canvas.toDataURL('image/jpeg', 0.85).split(',')[1], mediaType: 'image/jpeg' })
+      }
+      img.onerror = reject
+      img.src = url
+    })
+  }
+
+  async function resizeFile(file: File): Promise<{ imageBase64: string; mediaType: string }> {
+    const MAX_DIM = 1568
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      const url = URL.createObjectURL(file)
+      img.onload = () => {
+        URL.revokeObjectURL(url)
+        let { width, height } = img
+        if (width > MAX_DIM || height > MAX_DIM) {
+          if (width >= height) { height = Math.round((height / width) * MAX_DIM); width = MAX_DIM }
+          else { width = Math.round((width / height) * MAX_DIM); height = MAX_DIM }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (!ctx) { reject(new Error('Canvas unavailable')); return }
+        ctx.drawImage(img, 0, 0, width, height)
+        resolve({ imageBase64: canvas.toDataURL('image/jpeg', 0.85).split(',')[1], mediaType: 'image/jpeg' })
+      }
+      img.onerror = reject
+      img.src = url
+    })
+  }
+
   async function handleGenerateDescription() {
-    const photoUrl = (item?.photos ?? [])[0]
-    if (!photoUrl) return
     setGenerating(true)
     setSuggestions(null)
     setAppliedKeys(new Set())
     try {
-      const res = await fetch(photoUrl)
-      const buffer = await res.arrayBuffer()
-      const bytes = new Uint8Array(buffer)
-      let binary = ''
-      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
-      const base64 = btoa(binary)
-      const contentType = res.headers.get('content-type') ?? 'image/jpeg'
-      const mediaType = contentType.split(';')[0] as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+      const existingUrls = (item?.photos ?? []).filter(url => !removedPhotoUrls.has(url))
+      const [existingImages, newImages] = await Promise.all([
+        Promise.all(existingUrls.map(resizeUrl)),
+        Promise.all(newPhotos.map(resizeFile)),
+      ])
+      const images = [...existingImages, ...newImages]
+      if (!images.length) return
       const apiRes = await fetch('/api/generate-description', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: base64, mediaType }),
+        body: JSON.stringify({ images, userContext: userContext.trim() || undefined }),
       })
       const data = await apiRes.json()
-      if (data && !data.error) {
-        setSuggestions(data)
-        if (editing && data.description) setForm(f => ({ ...f, description: data.description }))
-      }
+      if (data && !data.error) setSuggestions(data)
     } catch (err) {
       console.error(err)
     }
@@ -295,9 +337,18 @@ export default function ItemPage() {
                 </div>
               )}
 
-              {/* AI analyze button */}
+              {/* AI analyze / re-analyze section */}
               {(item.photos ?? []).length > 0 && (
-                <div className="px-4 sm:px-0 pb-2 lg:pb-0">
+                <div className="px-4 sm:px-0 pb-2 lg:pb-0 flex flex-col gap-2">
+                  {editing && (
+                    <textarea
+                      value={userContext}
+                      onChange={e => setUserContext(e.target.value)}
+                      placeholder="Share your thoughts, observations, or context about this piece — Claude will factor them into the re-analysis..."
+                      rows={3}
+                      className="w-full border border-[#e5e5e5] rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#111] transition-colors resize-none placeholder:text-[#bbb]"
+                    />
+                  )}
                   <button
                     onClick={handleGenerateDescription}
                     disabled={generating}
@@ -315,7 +366,7 @@ export default function ItemPage() {
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                           <circle cx="12" cy="12" r="3" /><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83" />
                         </svg>
-                        Analyze with AI
+                        {editing ? 'Re-analyze with AI' : 'Analyze with AI'}
                       </>
                     )}
                   </button>
